@@ -26,19 +26,19 @@ COMMIT;
 
 除非系统通过严格的 ACID 测试，否则空谈事务的概念是不够的。ACID 表示原子性（Atomicity）、一致性（Consistency）、隔离性（Isolation）和持久性（Durability）。一个运行良好的事务处理系统，必须具备这些标准特征。
 
-#### 原子性（Atomicity）
+#### 1. 原子性（Atomicity）
 
 一个事务必须被视为一个不可分割的最小工作单元，整个事务中的所有操作要么全部提交成功，要么全部失败回滚，对于一个事务来说，不可能只执行其中的一部分操作，这就是事务的原子性。
 
-#### 一致性（Consistency）
+#### 2. 一致性（Consistency）
 
 数据库总是从一个一致性的状态转换到另外一个一致性的状态。在前面的例子中，一致性确保了，即使在执行第三、四条语句之间时系统崩溃，支票账户中也不会损失200美元，因为事务最终没有提交，所以事务中所做的修改也不会保存到数据库中。
 
-#### 隔离性（Isolation）
+#### 3. 隔离性（Isolation）
 
 **通常来说**，一个事务所做的修改在最终提交以前，对其他事务是不可见的。在前面的例子中，当执行完第三条语句、第四条语句还未开始时，此时有另外一个账户汇总程序开始运行，则其看到的支票账户的余额并没有被减去200美元。后面我们讨论隔离级别（Isolation level）的时候，会发现为什么我们要说“通常来说”是不可见的。
 
-#### 持久性（Durability）
+#### 4. 持久性（Durability）
 
 一旦事务提交，则其所做的修改就会永久保存到数据库中。此时即使系统崩溃，修改的数据也不会丢失。持久性是个有点模糊的概念，因为实际上持久性也分很多不同的级别。有些持久性策略能够提供非常强的安全保障，而有些则未必。而且不可能有能做到 100％ 的持久性保证的策略（如果数据库本身就能做到真正的持久性，那么备份又怎么能增加持久性呢？）。
 
@@ -46,36 +46,137 @@ COMMIT;
 
 就像锁粒度的升级会增加系统开销一样，这种事务处理过程中额外的安全性，也会需要数据库系统做更多的额外工作。一个实现了 ACID 的数据库，相比没有实现 ACID 的数据库，通常会需要更强的 CPU 处理能力、更大的内存和更多的磁盘空间。正如本章不断重复的，这也正是 MySQL 的存储引擎架构可以发挥优势的地方。用户可以根据业务是否需要事务处理，来选择合适的存储引擎。对于一些不需要事务的查询类应用，选择一个非事务型的存储引擎，可以获得更高的性能。即使存储引擎不支持事务，也可以通过 LOCK TABLES 语句为应用提供一定程度的保护，这些选择用户都可以自主决定。
 
+### 查看 MySQL 版本信息
+
+不同的 MySQL 版本之间，其内含的命令可能会有所变化。例如，查询 MySQL 隔离级别时，你可能会得到以下的结果：
+
+|     Variable_name     |     Value      |
+| :-------------------: | :------------: |
+| transaction_isolation | READ-COMMITTED |
+|     tx_isolation      | READ-COMMITTED |
+
+而实际上这中结果只会在某几个版本里面出现。其原因是，MySQL 官方从 5.7.20 版本开始，将 transaction_isolation 作为 tx_isolation 的别名引入了 MySQL 中，而 tx_isolation 在 MySQL 8.0 之后就被废弃了。
+
+因此，无论是 transaction_isolation 还是 tx_isolation，它们其实表示的都是当前 MySQL 的隔离级别。但这种差别也造成了查询隔离级别时，其使用的命令会出现差异。
+
+显然，获取 MySQL 版本信息对命令的使用会有所帮助。
+
+#### 1. 登录显示
+
+实际上，在 MySQL 安装完毕后，可以使用命令行登录 MySQL 数据库。在登录时，MySQL 就会显示相关的版本信息：
+
+![image-20220312223914401](images/MySQL.images/image-20220312223914401.png)
+
+#### 2. 命令行查询
+
+如果你不习惯使用终端的方式登录 MySQL，并且已经在使用一些第三方的数据库管理工具了，那么你可以通过命令查询 MySQL 版本信息：
+
+```sql
+SELECT VERSION() FROM DUAL;
+```
 
 ### MySQL 中的事务管理
 
-#### 事务的控制语句
+在了解事务管理之前，先学习如何更改会话中的隔离级别。所谓会话，以 Navicat 数据库管理工具为例，一次查询时所出现的窗口即视为一次会话：
 
-MySQL 中通常使用一些方式处理事务：
-- 使用 BEGIN、ROLLBACK、COMMIT 实现；
-- 直接使用 SET 来改变 MySQL 的自动提交模式（默认是自动提交）：
-  - SET AUTOCOMMIT = 0，禁止自动提交
-  - SET AUTOCOMMIT = 1，开启自动提交
+![image-20220312225632300](images/MySQL.images/image-20220312225632300.png)
 
-1. 设置事务隔离级别：
-   - 查看当前会话隔离级别：SELECT @@tx_isolation;
-   - 查看系统当前隔离级别：SELECT @@global.tx_isolation;
-   - 设置当前会话隔离级别：SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ;
-   - 设置系统当前隔离级别：SET GLOBAL TRANSACTION ISOLATION LEVEL REPEATABLE READ;
-2. 开启事务：BEGIN 或 START TRANSACTION 显式地开启一个事务，二者等价；
-3. 提交事务：COMMIT 或 COMMIT WORK 提交事务，二者等价；
-4. 回滚事务：ROLLBACK 或 ROLLBACK WORK，二者等价；
-5. 保存点：SAVEPOINT identifier，SAVEPOINT 允许在事务中创建一个保存点，一个事务中可以有多个 SAVEPOINT；
-6. 删除保存点：RELEASE SAVEPOINT identifier，可以删除一个保存点，如果当前没有指定任何保存点，执行该语句会抛出一个异常；
-7. 回滚到标记点：ROLLBACK TO identifier，把事务回滚到标记点。
+#### 1. 查询、修改隔离级别
 
-#### 事务并发下产生的问题
+MySQL 默认的事务隔离级别为 REPEATABLE-READ，MySQL 中提供了更改独立会话中事务隔离级别的命令：
 
-##### 更新丢失
+```sql
+# READ-UNCOMMITTED/READ-COMMITTED/REPEATABLE-READ/SERIALIZABLE
+SET SESSION TRANSACTION ISOLATION LEVEL READ UNCOMMITTED; # CHANGE INTO READ-UNCOMMITTED
+```
+
+查看当前会话中隔离级别的命令为：
+
+```sql
+SHOW VARIABLES LIKE '%ISOLATION'; # ANY VERSION
+
+SELECT @@tx_isolation; # BEFORE MySQL 8.0 VERSION
+SELECT @@transaction_isolation; # AFTER MySQL 5.7.20 VERSION
+```
+
+查看全局会话中隔离级别的命令为：
+
+```sql
+SELECT @@global.tx_isolation; # BEFORE MySQL 8.0 VERSION
+SELECT @@global.transaction_isolation; # AFTER MySQL 5.7.20 VERSION
+```
+
+修改全局事务隔离级别的命令为：
+
+```SQL
+SET GLOBAL TRANSACTION ISOLATION LEVEL REPEATABLE READ; # CHANGE INTO REPEATABLE-READ
+```
+
+注意，并不推荐以修改 MySQL 全局配置的方式去更改事务的隔离级别，可能引发会话的查询异常。
+
+#### 2. 事务控制语句
+
+MySQL 默认使用 InnoDB 作为存储引擎，该引擎支持事务。但通常情况下，事务是自动开启并自动提交的。使用以下命令，查看事务自动提交功能的开启状态：
+
+```SQL
+SHOW VARIABLES LIKE 'AUTOCOMMIT';
+```
+
+![image-20220312231022985](images/MySQL.images/image-20220312231022985.png)
+
+如果希望禁用自动提交功能，可以通过以下命令完成：
+
+```SQL
+SET AUTOCOMMIT = 0;
+```
+
+AUTOCOMMIT 参数为 0 时，表示禁止自动提交；参数为 1 时，表示开启自动提交。
+
+实际上，不论是否开启自动提交功能，你都可以显式的开启或关闭一个事务：
+
+1. 开启事务：BEGIN 或 START TRANSACTION 用于显式地开启一个事务；
+2. 提交事务：COMMIT 或 COMMIT WORK 用于提交事务；
+3. 回滚事务：ROLLBACK 或 ROLLBACK WORK 用于回滚事务。
+
+开启事务的命令总是需要和提交事务或回滚事务的命令一起使用。使用示例：
+
+```SQL
+BEGIN;
+UPDATE `user` SET age = 18 WHERE id = 1;
+COMMIT;
+
+START TRANSACTION;
+DELETE FROM `user` WHERE id = 1;
+ROLLBACK WORK;
+```
+
+除此之外，事务开启与事务结束之间，可以设立保存点，使用相关命令可以将事务回滚至保存点：
+
+1. 保存点：SAVEPOINT *identifier*，在事务中创建一个保存点，一个事务中可以有多个 SAVEPOINT；
+2. 删除保存点：RELEASE SAVEPOINT *identifier*，可以删除一个保存点；
+3. 回滚到保存点：ROLLBACK TO *identifier*，把事务回滚到保存点。
+
+保存点的作用实际上不大，了解即可。
+
+
+
+
+
+
+
+
+
+
+
+### 事务并发下引发的问题
+
+本章节需要在不考虑任何事务隔离级别的情况下进行阅读。事务的隔离性表明，任何一个设计良好的事务系统，其事务内所作出的修改在最终提交之前，都不应该对外可见。
+
+#### 更新丢失
 
 两个事务都同时更新一行数据，一个事务对数据的更新把另一个事务对数据的更新覆盖了。这是因为系统没有执行任何的锁操作，因此并发事务并没有被隔离开来。
 
-##### 脏读
+#### 脏读
 
 一个事务读取到了另一个事务未提交的数据操作结果。这是相当危险的，因为很可能所有的操作都被回滚。
 
@@ -83,12 +184,12 @@ MySQL 中通常使用一些方式处理事务：
 | :------------------------------: | :--: | :-------------------------------: | :--: |
 |              BEGIN               |  -   |               BEGIN               |  -   |
 |                -                 |  -   | SELECT age FROM user WHERE id=1;  |  5   |
-|                -                 |  -   | UPDATE user SET age=10 WHER id=1; |  ✔   |
+|                -                 |  -   | UPDATE user SET age=10 WHER id=1; |  ok  |
 | SELECT age FROM user WHERE id=1; |  10  |                 -                 |  -   |
-|              COMMIT              |  ✔   |             ROLLBACK              |  ✔   |
-|                -                 |  -   |              COMMIT               |  ✔   |
+|              COMMIT              |  ok  |             ROLLBACK              |  ok  |
+|                -                 |  -   |              COMMIT               |  ok  |
 
-##### 不可重复读
+#### 不可重复读
 
 一个事务对同一行数据重复读取两次，但是却得到了不同的结果。
 
@@ -96,32 +197,32 @@ MySQL 中通常使用一些方式处理事务：
 
 |              会话1               | 值1  |               会话2               | 值2  |
 | :------------------------------: | :--: | :-------------------------------: | :--: |
-|              BEGIN               |  ✔   |               BEGIN               |  ✔   |
+|              BEGIN               |  ok  |               BEGIN               |  ok  |
 | SELECT age FROM user WHERE id=1; |  5   |                 -                 |  -   |
-|                -                 |  -   | UPDATE user SET age=10 WHER id=1; |  ✔   |
-|                -                 |  -   |              COMMIT               |  ✔   |
+|                -                 |  -   | UPDATE user SET age=10 WHER id=1; |  ok  |
+|                -                 |  -   |              COMMIT               |  ok  |
 | SELECT age FROM user WHERE id=1; |  10  |                 -                 |  -   |
-|              COMMIT              |  ✔   |                 -                 |  -   |
+|              COMMIT              |  ok  |                 -                 |  -   |
 
 幻读：事务在操作过程中进行两次查询，第二次查询的结果包含了第一次查询中未出现的数据或者缺少了第一次查询中出现的数据（这里并不要求两次查询的 SQL 语句相同）。这是因为在两次查询过程中有另外一个事务插入或删除数据造成的。
 
 |            会话1            | 值1  |                       会话2                       | 值2  |
 | :-------------------------: | :--: | :-----------------------------------------------: | :--: |
-|            BEGIN            |  ✔   |                       BEGIN                       |  ✔   |
+|            BEGIN            |  ok  |                       BEGIN                       |  ok  |
 | SELECT COUNT(id) FROM user; |  3   |                         -                         |  -   |
-|              -              |  -   | INSERT INTO user(id, username) VALUE(6, "dylan"); |  ✔   |
-|              -              |  -   |                      COMMIT                       |  ✔   |
+|              -              |  -   | INSERT INTO user(id, username) VALUE(6, "dylan"); |  ok  |
+|              -              |  -   |                      COMMIT                       |  ok  |
 | SELECT COUNT(id) FROM user; |  4   |                         -                         |  -   |
-|           COMMIT            |  ✔   |                         -                         |  -   |
+|           COMMIT            |  ok  |                         -                         |  -   |
 
-##### 幻读
+#### 幻读
 
 这里的幻读是不可重复读的一种特殊情况。主要偏向于插入和删除数据。
 
 |                       会话1                       | 值1  |                       会话2                       | 值2  |
 | :-----------------------------------------------: | :--: | :-----------------------------------------------: | :--: |
-|                       BEGIN                       |  ⭕   |                       BEGIN                       |  ⭕   |
-|               SELECT \* FROM user;                |  ⭕   |                         -                         |  -   |
+|                       BEGIN                       |  ok  |                       BEGIN                       |  ⭕   |
+|               SELECT \* FROM user;                |  no  |                         -                         |  -   |
 |                         -                         |  -   | INSERT INTO user(id, username) VALUE(2, "dylan"); |  ⭕   |
 |                         -                         |  -   |                         -                         |  -   |
 |                         -                         |  -   |                      COMMIT                       |  ⭕   |
@@ -130,23 +231,23 @@ MySQL 中通常使用一些方式处理事务：
 | INSERT INTO user(id, username) VALUE(2, "dylan"); |  ❌   |                         -                         |  -   |
 |                     ROLLBACK                      |  ⭕   |                         -                         |  -   |
 
-#### 事务的隔离级别
+### 事务的隔离级别
 
 MySQL 中使用 InnoDB 存储引擎，提供的事务隔离级别有 4 种：
 
-##### READ UNCOMMITTED（读未提交）
+#### READ UNCOMMITTED（读未提交）
 
 允许脏读取，但不允许更新丢失。如果一个事务已经开始写数据，则另外一个事务则不允许同时进行写操作，但允许其他事务读此行数据。该隔离级别可以通过“排他写锁”实现。
 
-##### READ COMMITTED（读提交）
+#### READ COMMITTED（读提交）
 
 允许不可重复读取不可重复读取)，但不允许脏读取。这可以通过“瞬间共享读锁”和“排他写锁”实现。读取数据的事务允许其他事务继续访问该行数据，但是未提交的写事务将会禁止其他事务访问该行。
 
-##### REPEATABLE READ（可重复读）
+#### REPEATABLE READ（可重复读）
 
 禁止不可重复读取和脏读取，但是有时可能出现幻读数据。这可以通过“共享读锁”和“排他写锁”实现。读取数据的事务将会禁止写事务（但允许读事务），写事务则禁止任何其他事务。
 
-##### SERIALIZABLE（串行化）
+#### SERIALIZABLE（串行化）
 
 提供严格的事务隔离。它要求事务序列化执行，事务只能一个接着一个地执行，不能并发执行。仅仅通过“行级锁”是无法实现事务序列化的，必须通过其他机制保证新插入的数据不会被刚执行查询操作的事务访问到。
 
@@ -157,7 +258,7 @@ MySQL 中使用 InnoDB 存储引擎，提供的事务隔离级别有 4 种：
 | REPEATABLE READ（可重复读）  | 否   | 否         | 是   |
 | SERIALIZABLE（串行化）       | 否   | 否         | 否   |
 
-#### MySQL中的REPEATABLE READ
+### MySQL中的REPEATABLE READ
 
 MySQL 中的 REPEATABLE READ 是解决了部分幻读的问题：
 
